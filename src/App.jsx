@@ -1,11 +1,86 @@
 import React, { useState } from 'react'
-import OpenAI from 'openai'
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true // Only for demo purposes
-})
+// Gemini API translation function
+const translateWithGemini = async (text, targetLanguage) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+  
+  // Debug: Log API key info
+  console.log('API Key exists:', !!apiKey)
+  console.log('API Key length:', apiKey?.length)
+  console.log('API Key starts with AIza:', apiKey?.startsWith('AIza'))
+  
+  if (!apiKey) {
+    throw new Error('Gemini API key not found in environment variables')
+  }
+
+  if (!apiKey.startsWith('AIza')) {
+    throw new Error('Invalid Gemini API key format. Key should start with "AIza"')
+  }
+
+  const prompt = `Translate the following text to ${targetLanguage}. Only return the translation, no explanations:\n\n"${text}"`
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{
+          text: prompt
+        }]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1000,
+      }
+    })
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json()
+    throw new Error(`Gemini API error: ${errorData.error?.message || 'Request failed'}`)
+  }
+
+  const data = await response.json()
+  const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  
+  if (!translatedText) {
+    throw new Error('No translation received from Gemini')
+  }
+  
+  return translatedText
+}
+
+// Simple fallback translation using LibreTranslate (completely free)
+const fallbackTranslate = async (text, targetLanguage) => {
+  const langCodes = {
+    'French': 'fr',
+    'Spanish': 'es', 
+    'Japanese': 'ja'
+
+  }
+  
+  const response = await fetch('https://libretranslate.com/translate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      q: text,
+      source: 'auto',
+      target: langCodes[targetLanguage] || 'fr',
+      format: 'text'
+    })
+  })
+  
+  if (!response.ok) {
+    throw new Error('Fallback translation failed')
+  }
+  
+  const data = await response.json()
+  return data.translatedText
+}
 
 export default function App() {
   const [inputText, setInputText] = useState('')
@@ -13,6 +88,7 @@ export default function App() {
   const [translatedText, setTranslatedText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [lastRequestTime, setLastRequestTime] = useState(0)
 
   const handleTranslate = async () => {
     if (!inputText.trim()) {
@@ -20,43 +96,40 @@ export default function App() {
       return
     }
 
+    // Rate limiting: enforce minimum 2 seconds between requests
+    const now = Date.now()
+    const timeSinceLastRequest = now - lastRequestTime
+    const minimumInterval = 2000
+
+    if (timeSinceLastRequest < minimumInterval) {
+      const waitTime = minimumInterval - timeSinceLastRequest
+      setError(`⏰ Please wait ${Math.ceil(waitTime / 1000)} seconds before translating again`)
+      return
+    }
+
     setIsLoading(true)
     setError('')
     setTranslatedText('')
+    setLastRequestTime(now)
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo", // Latest and most cost-effective model
-        messages: [
-          {
-            role: "system",
-            content: `You are a professional translator. Translate the given text to ${selectedLanguage}. Only return the translation, nothing else.`
-          },
-          {
-            role: "user",
-            content: inputText
-          }
-        ],
-        temperature: 0.3, // Lower temperature for more consistent translations
-        max_tokens: 1000, // Limit response length
-      })
-
-      const translation = completion.choices[0].message.content
+      // Try Gemini first
+      const translation = await translateWithGemini(inputText, selectedLanguage)
       setTranslatedText(translation)
+      // Clear any previous errors on success
+      setError('')
     } catch (err) {
-      console.error('Translation error:', err)
+      console.error('Gemini translation error:', err)
       
-      // Handle specific error types
-      if (err.status === 429) {
-        setError('⚠️ OpenAI quota exceeded. Please check your billing at platform.openai.com or try again later.')
-      } else if (err.status === 401) {
-        setError('❌ Invalid API key. Please check your OpenAI API key.')
-      } else if (err.status === 403) {
-        setError('🚫 Access forbidden. Please check your OpenAI account permissions.')
-      } else if (err.name === 'RateLimitError') {
-        setError('⏰ Rate limit reached. Please wait a moment and try again.')
-      } else {
-        setError(`❌ Translation failed: ${err.message || 'Unknown error occurred'}`)
+      // Try fallback service
+      try {
+        const fallbackResult = await fallbackTranslate(inputText, selectedLanguage)
+        setTranslatedText(fallbackResult)
+        // Clear errors on successful fallback
+        setError('')
+      } catch (fallbackErr) {
+        console.error('Fallback translation error:', fallbackErr)
+        setError(`❌ Translation failed: ${err.message}. Please check your internet connection.`)
       }
     } finally {
       setIsLoading(false)
