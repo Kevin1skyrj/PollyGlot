@@ -1,0 +1,12 @@
+name = "translate-proxy"
+main = "workers/translate-proxy.js"
+compatibility_date = "2025-08-16"
+
+# Replace with your Cloudflare account ID
+# You can find this in your Cloudflare dashboard URL or in the right sidebar
+account_id = ""
+
+# The AI variable is set in the Cloudflare dashboard as a secret
+# Workers → translate-proxy → Settings → Variables
+# Variable name: AI
+# Variable value: your Gemini API key
