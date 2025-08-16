@@ -1,52 +1,28 @@
 import React, { useState } from 'react'
 
-// Gemini API translation function
+// Translation function using backend API
 const translateWithGemini = async (text, targetLanguage) => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-  
-  // Debug: Log API key info
-  console.log('API Key exists:', !!apiKey)
-  console.log('API Key length:', apiKey?.length)
-  console.log('API Key starts with AIza:', apiKey?.startsWith('AIza'))
-  
-  if (!apiKey) {
-    throw new Error('Gemini API key not found in environment variables')
-  }
-
-  if (!apiKey.startsWith('AIza')) {
-    throw new Error('Invalid Gemini API key format. Key should start with "AIza"')
-  }
-
-  const prompt = `Translate the following text to ${targetLanguage}. Only return the translation, no explanations:\n\n"${text}"`
-
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+  const response = await fetch('/api/translate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      contents: [{
-        parts: [{
-          text: prompt
-        }]
-      }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 1000,
-      }
+      text,
+      targetLanguage
     })
   })
 
   if (!response.ok) {
     const errorData = await response.json()
-    throw new Error(`Gemini API error: ${errorData.error?.message || 'Request failed'}`)
+    throw new Error(errorData.error || 'Translation failed')
   }
 
   const data = await response.json()
-  const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  const translatedText = data.translation
   
   if (!translatedText) {
-    throw new Error('No translation received from Gemini')
+    throw new Error('No translation received')
   }
   
   return translatedText
