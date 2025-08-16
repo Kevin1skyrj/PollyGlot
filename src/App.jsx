@@ -2,7 +2,10 @@ import React, { useState } from 'react'
 
 // Server-side translation via Worker proxy
 const translateWithWorker = async (text, targetLanguage) => {
-  const response = await fetch('/api/translate', {
+  // Use direct Worker URL temporarily if route mapping doesn't work
+  const workerUrl = 'https://translate-proxy.rajatpndey257.workers.dev/api/translate'
+  
+  const response = await fetch(workerUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -14,11 +17,29 @@ const translateWithWorker = async (text, targetLanguage) => {
   })
 
   if (!response.ok) {
-    const errorData = await response.json()
-    throw new Error(`Translation failed: ${errorData.error || 'Request failed'}`)
+    // Better error handling for common issues
+    if (response.status === 405) {
+      throw new Error('Worker route not configured - requests hitting Pages instead of Worker')
+    }
+    
+    let errorMessage = `HTTP ${response.status}`
+    try {
+      const errorData = await response.json()
+      errorMessage = errorData.error || errorMessage
+    } catch {
+      // If response isn't JSON, use status text
+      errorMessage = response.statusText || errorMessage
+    }
+    
+    throw new Error(`Translation failed: ${errorMessage}`)
   }
 
-  const data = await response.json()
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error('Invalid response from server - check Worker logs')
+  }
   
   if (!data.translated) {
     throw new Error('No translation received from server')
