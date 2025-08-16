@@ -1,51 +1,55 @@
 import React, { useState } from 'react'
 
-// Server-side translation via Worker proxy
-const translateWithWorker = async (text, targetLanguage) => {
-  // Use direct Worker URL temporarily if route mapping doesn't work
-  const workerUrl = 'https://translate-proxy.rajatpndey257.workers.dev/api/translate'
+// Gemini API translation function
+const translateWithGemini = async (text, targetLanguage) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
   
-  const response = await fetch(workerUrl, {
+  // Debug: Log API key info
+  console.log('API Key exists:', !!apiKey)
+  console.log('API Key length:', apiKey?.length)
+  console.log('API Key starts with AIza:', apiKey?.startsWith('AIza'))
+  
+  if (!apiKey) {
+    throw new Error('Gemini API key not found in environment variables')
+  }
+
+  if (!apiKey.startsWith('AIza')) {
+    throw new Error('Invalid Gemini API key format. Key should start with "AIza"')
+  }
+
+  const prompt = `Translate the following text to ${targetLanguage}. Only return the translation, no explanations:\n\n"${text}"`
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      text: text,
-      targetLanguage: targetLanguage
+      contents: [{
+        parts: [{
+          text: prompt
+        }]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1000,
+      }
     })
   })
 
   if (!response.ok) {
-    // Better error handling for common issues
-    if (response.status === 405) {
-      throw new Error('Worker route not configured - requests hitting Pages instead of Worker')
-    }
-    
-    let errorMessage = `HTTP ${response.status}`
-    try {
-      const errorData = await response.json()
-      errorMessage = errorData.error || errorMessage
-    } catch {
-      // If response isn't JSON, use status text
-      errorMessage = response.statusText || errorMessage
-    }
-    
-    throw new Error(`Translation failed: ${errorMessage}`)
+    const errorData = await response.json()
+    throw new Error(`Gemini API error: ${errorData.error?.message || 'Request failed'}`)
   }
 
-  let data
-  try {
-    data = await response.json()
-  } catch {
-    throw new Error('Invalid response from server - check Worker logs')
+  const data = await response.json()
+  const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  
+  if (!translatedText) {
+    throw new Error('No translation received from Gemini')
   }
   
-  if (!data.translated) {
-    throw new Error('No translation received from server')
-  }
-  
-  return data.translated
+  return translatedText
 }
 
 // Simple fallback translation using LibreTranslate (completely free)
@@ -109,13 +113,13 @@ export default function App() {
     setLastRequestTime(now)
 
     try {
-      // Use server-side Worker proxy
-      const translation = await translateWithWorker(inputText, selectedLanguage)
+      // Try Gemini first
+      const translation = await translateWithGemini(inputText, selectedLanguage)
       setTranslatedText(translation)
       // Clear any previous errors on success
       setError('')
     } catch (err) {
-      console.error('Worker translation error:', err)
+      console.error('Gemini translation error:', err)
       
       // Try fallback service
       try {
